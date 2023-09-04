@@ -1,52 +1,46 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
+import {
+  BrowserWindow,
+  OpenDialogSyncOptions,
+  dialog,
+  ipcMain,
+} from 'electron';
 import * as path from 'path';
 import { readdirSync, statSync } from 'fs-extra';
 import { Config } from './config';
 import * as chokidar from 'chokidar';
 import * as fs from 'fs-extra';
+import { FileValidator, ValidationRule } from './file-validator';
 
 const folderPath = path.join(__dirname, '../file-upload');
 
 export function initFileHandling() {
   ipcMain.on('upload-files', (event, args) => {
     const folderName = folderPath + '/' + args.folderName;
-    const validationRule: FileValidationRule = args.validationRule;
+    const validationRule: ValidationRule = args.validationRule;
+    let fileOptions: OpenDialogSyncOptions = {
+      title: 'Select files',
+      defaultPath: folderName,
+      filters: [],
+    };
+    if (validationRule.allowExtentions) {
+      fileOptions.filters = [
+        { name: 'JSON', extensions: validationRule.allowExtentions },
+      ];
+    }
     const files = dialog.showOpenDialogSync(
       Config.mainWindow as BrowserWindow,
-      {
-        title: 'Select files',
-        defaultPath: folderName,
-        filters: [{ name: 'JSON', extensions: validationRule.fileExtensions }],
-      }
+      fileOptions
     );
     if (files) {
       for (let item of files) {
-        if (statSync(item).size > validationRule.maxSize) {
-          console.log('File size is big');
+        let validatorMessage = FileValidator.validateFile(item, validationRule);
+        if (!validatorMessage.valid) {
           showErrorDialog({
-            title: 'Size error',
-            body:
-              'File size is big. It should be less than ' +
-              validationRule.maxSize +
-              ' bytes',
+            title: validatorMessage.error?.shortDesc as string,
+            body: validatorMessage.error?.descreption as string,
           });
-          event.returnValue = { error: 'File size is big' };
+          event.returnValue = { error: validatorMessage.error?.descreption };
           return;
-        }
-        if (validationRule.fileExtensions.length > 0) {
-          const extension = item.split('.').filter(Boolean).slice(1).join('.');
-          if (!validationRule.fileExtensions.find((ext) => ext === extension)) {
-            console.log('File exetension not allowed');
-
-            showErrorDialog({
-              title: 'File exetension error',
-              body:
-                'File exetension not allowed. Allowed exentions are ' +
-                validationRule.fileExtensions.toString(),
-            });
-            event.returnValue = { error: 'File exetension not allowed' };
-            return;
-          }
         }
       }
     }
@@ -100,9 +94,4 @@ export interface FileItem {
   name: string;
   size: number;
   extension: string;
-}
-
-export interface FileValidationRule {
-  maxSize: number;
-  fileExtensions: string[];
 }
